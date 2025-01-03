@@ -25,7 +25,6 @@ Start by cloning this repository to your server using the following command:
 ```bash
 git clone https://github.com/MuhammadAdil-Developer/langflow-chatbot
 cd langflow-chat
-Replace <repository_url> with the URL of your repository and <repository_directory> with the directory where you want the project to be placed.
 
 Step 2: Build the Project with Docker Compose
 Once you have cloned the repository, navigate to the project directory and run the following command to build the project using Docker Compose:
