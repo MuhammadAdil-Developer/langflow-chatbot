@@ -29,7 +29,7 @@ from utils import (validate_mongodb_uri, validate_mongodb_database_name, validat
 
 load_dotenv()
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-print(os.getenv("GOOGLE_API_KEY"))
+username = os.getenv("username")
 
 app = FastAPI()
 
@@ -501,6 +501,7 @@ async def chat(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
+
 @app.get("/chat")
 async def get_history(
     user_session: UserSession = Depends(get_current_user), 
@@ -509,6 +510,8 @@ async def get_history(
     try:
         email_id = user_session.email_id
         role = user_session.role
+        # Directly use the username from .env
+        username = os.getenv("username")
 
         connection = connect_to_db()
         if connection:
@@ -538,12 +541,13 @@ async def get_history(
                 grouped_history[thread_id]["human_message"].append(record["user_query"])
                 grouped_history[thread_id]["ai_response"].append(record["ai_response"])
 
-            return [{"role": role, **item} for item in grouped_history.values()]
+            return [{"role": role, "username": username, **item} for item in grouped_history.values()]
 
         else:
             raise HTTPException(status_code=500, detail="Database connection failed")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error retrieving history: {str(e)}")
+
 
 
 if __name__ == "__main__":
