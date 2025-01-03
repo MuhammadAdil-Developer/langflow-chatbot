@@ -4,75 +4,67 @@ This application is built using **FastAPI** and enables users to connect to both
 
 ---
 
-## **Requirements**
+## **Project Setup and Installation**
 
-### **System Requirements**
-- **Python Version:** Python 3.10 or higher
-- **Required Python Packages:** See the list below.
+### **Pre-requisites**
 
----
+Before starting, ensure the following are in place:
 
-## **Required Packages**
-
-To install the necessary packages, follow these steps:
-
-1. Create a `requirements.txt` file with the following content:
-    ```text
-    fastapi
-    uvicorn
-    mysql-connector-python
-    pymongo
-    langchain
-    langflow
-    ```
-
-2. Install the packages using:
-    ```bash
-    pip install -r requirements.txt
-    ```
+- **Python Version:** 3.10 or higher
+- **Docker:** Make sure Docker is installed and running on your server.
+- **Docker Compose:** Ensure Docker Compose is installed for building and running the containers.
 
 ---
 
-## **Application Structure**
+## **Installation and Setup**
 
-The application consists of the following components:
+### **Step 1: Clone the Repository**
 
-1. **FastAPI App**
-   - The main application responsible for handling incoming requests and managing API endpoints.
+Start by cloning this repository to your server using the following command:
 
-2. **Database Connection**
-   - Functions for connecting to:
-     - **SQL Databases:** (e.g., MySQL)
-     - **NoSQL Databases:** (e.g., MongoDB)
+```bash
+git clone https://github.com/MuhammadAdil-Developer/langflow-chatbot
+cd langflow-chat
+Replace <repository_url> with the URL of your repository and <repository_directory> with the directory where you want the project to be placed.
 
-3. **Agent Components**
-   - Components to create SQL and NoSQL agents for handling database queries and responses.
+Step 2: Build the Project with Docker Compose
+Once you have cloned the repository, navigate to the project directory and run the following command to build the project using Docker Compose:
 
-4. **User Session Management**
-   - Functions for managing user sessions and chat histories.
+bash
+Copy code
+docker-compose up --build
+This command will:
 
----
+Build the Docker containers specified in the docker-compose.yml file.
+Install all necessary dependencies as defined in the Dockerfile.
+Step 3: Verify the Build
+After running the build, ensure there are no dependency errors or issues. If the build completes successfully, Docker Compose will automatically start the application in the containers.
 
-## **Running the Application**
+If there are any errors during the build,so resolve them before proceeding.
 
-### **Step 1: Setting Up Environment Variables**
+Running the Application
+Once the project is built , follow these steps to run the FastAPI application:
 
-Before running the application, set up your environment variables for database connections and API keys. Create a `.env` file in the root directory with the following content:
 
-```text
-# Example .env file content
-SQL_DATABASE_URI="your_sql_database_uri"
-NOSQL_DATABASE_URI="your_nosql_database_uri"
-API_KEY="your_api_key"
-Step 2: Starting the Server
-Run the FastAPI application using the following command:
+The server should already be running if you followed the previous step. However, if you need to manually start it, you can use the following command inside the container:
 
 bash
 Copy code
 uvicorn main:app --reload
-Step 3: Accessing the API
-Access the API at: http://127.0.0.1:8000
-Interactive API documentation is available at: http://127.0.0.1:8000/docs
+Access the Application
+
+After the server starts, you can access the application through your server’s IP address. Open a web browser and go to:
+
+arduino
+Copy code
+http://<your_server_ip>:8080
+Replace <your_server_ip> with your server's actual IP address.
+
+You can also access the interactive API documentation at:
+
+arduino
+Copy code
+http://<your_server_ip>:8080/docs
 API Endpoints
 1. Connect to Database
 Endpoint: POST /connect-db
@@ -100,7 +92,7 @@ Copy code
 Endpoint: GET /chat
 Description: Retrieves the chat history for a user session.
 Error Handling
-The application includes error handling for various scenarios, such as:
+The application includes error handling for various scenarios, including:
 
 Invalid database URIs.
 Connection failures.
@@ -109,3 +101,10 @@ Future Enhancements
 Add support for additional database types.
 Improve chat interface with more conversational AI features.
 Implement authentication for secure API access.
+Troubleshooting
+If you encounter any issues during setup or while running the project, check the following:
+
+Docker Compose Build Errors:
+
+Ensure Docker is properly installed and running.
+Check for any missing dependencies or errors in the Dockerfile or docker-compose.yml.
