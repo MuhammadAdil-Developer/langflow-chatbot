@@ -1,98 +1,100 @@
-# from langflow.custom import CustomComponent
-# from langchain_community.utilities import SQLDatabase
-# from langchain_community.agent_toolkits import SQLDatabaseToolkit
-# from langchain_community.agent_toolkits.sql.base import create_sql_agent
-# from langflow.field_typing import LanguageModel
-# from langchain.agents import AgentExecutor
-# from langchain_google_genai import ChatGoogleGenerativeAI
-
-# from typing import Callable, Union
-# # Replace this with the appropriate GenAI import if needed
-# # from genai import GenAIModel  # Example import for GenAI
-
-
-# class SQLAgentComponent(CustomComponent):
-#     display_name = "SQLAgent"
-#     description = "Construct an SQL agent from an LLM and tools."
-
-#     def build_config(self):
-#         return {
-#             "llm": {"display_name": "LLM"},
-#             "database_uri": {"display_name": "Database URI"},
-#             "verbose": {"display_name": "Verbose", "value": False, "advanced": True},
-#         }
-
-#     def build(
-#         self,
-#         llm: LanguageModel,
-#         database_uri: str,
-#         verbose: bool = False,
-#     ) -> Union[AgentExecutor, Callable]:
-#         db = SQLDatabase.from_uri(database_uri)
-#         toolkit = SQLDatabaseToolkit(db=db, llm=llm)
-#         return create_sql_agent(llm=llm, toolkit=toolkit, verbose=verbose, handle_parsing_errors=True)
-
-# def create_sql_query_agent(api_key: str, database_uri: str, verbose: bool = False):
-#     try:
-#         # Replace with the appropriate GenAI initialization
-#         llm = ChatGoogleGenerativeAI(
-#             api_key="AIzaSyAEOVGaFTlqhwDVhuw5XuddBOM6ZNoYIdk",
-#             model="gemini-1.5-flash",
-#             temperature=0
-#         )
-        
-#         sql_agent_component = SQLAgentComponent()
-        
-#         sql_agent = sql_agent_component.build(
-#             llm=llm,
-#             database_uri=database_uri,
-#             verbose=verbose
-#         )
-        
-#         return sql_agent, sql_agent_component
-        
-#     except Exception as e:
-#         raise Exception(f"Error creating SQL agent: {str(e)}")
-
-# def query_database(agent: AgentExecutor, question: str) -> str:
-#     try:
-#         response = agent.run(question)
-#         return response
-#     except Exception as e:
-#         return f"Error querying database: {str(e)}"
-
-# if __name__ == "__main__":
-#     openai_api_key = "AIzaSyAEOVGaFTlqhwDVhuw5XuddBOM6ZNoYIdk"
-#     database_uri = "postgresql://adiladmin:admin123@localhost:5432/chinook"
-    
-#     try:
-#         sql_agent, component = create_sql_query_agent(
-#             api_key=openai_api_key,
-#             database_uri=database_uri,
-#             verbose=True
-#         )
-        
-#         questions = [# Note: Replace **<YOUR_APPLICATION_TOKEN>** with your actual Application token
-
-
-
-
-
+import os
+import uuid
+import mysql.connector
+from mysql.connector import Error
+from fastapi import FastAPI, HTTPException, Query, Depends
+from fastapi.middleware.cors import CORSMiddleware
 from langflow.custom import CustomComponent
+from langchain_community.utilities import SQLDatabase
+from langchain_community.agent_toolkits import SQLDatabaseToolkit
+from langchain_community.agent_toolkits.sql.base import create_sql_agent
 from langflow.field_typing import LanguageModel
 from langchain.agents import AgentExecutor, initialize_agent, AgentType
-from typing import Callable, Union
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_mongodb import MongoDBAtlasVectorSearch
 from langchain.tools import Tool
 from pymongo import MongoClient
 from langchain.chains import RetrievalQA
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from langflow.components.tools import RetrieverToolComponent
+from dotenv import load_dotenv
+from typing import Callable, Union, Optional
+from pydantic import BaseModel
+from memory import save_query_and_answer, connect_to_db
+from heading_generator import generate_heading
+from utils import (validate_mongodb_uri, validate_mongodb_database_name, validate_mongodb_collection_name, 
+                   validate_sql_connection,validate_mongodb_connection, create_enhanced_agent_prompt,get_current_user,
+                   save_user_session
+)
+
+load_dotenv()
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+print(os.getenv("GOOGLE_API_KEY"))
+
+app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
+    allow_headers=["Authorization", "Content-Type"],
+)
+
+# Request Model for handling input
+class QueryRequest(BaseModel):
+    question: str = None
+    db_name: str = None  
+    database_uri: str = None  
+    collection_name: str = None
+    db_type: str = None
+
+class UserSession(BaseModel):
+    email_id: str
+    token: str
+    role: str
+
+class SQLAgentComponent:
+    display_name = "SQLAgent"
+    description = "Construct an SQL agent from an LLM and tools."
+
+    def build_config(self):
+        return {
+            "llm": {"display_name": "LLM"},
+            "database_uri": {"display_name": "Database URI"},
+            "verbose": {"display_name": "Verbose", "value": False, "advanced": True},
+        }
+
+    def build(self, llm, database_uri: str, verbose: bool = False):
+        try:
+            db = SQLDatabase.from_uri(database_uri)
+            toolkit = SQLDatabaseToolkit(db=db, llm=llm)
+            
+            retriever_tool = RetrieverToolComponent()
+            retriever = retriever_tool.build(
+                retriever=toolkit,
+                name="SQLRetriever",
+                description="Retrieves data from SQL database"
+            )
+            
+            prompt = create_enhanced_agent_prompt("sql")
+            agent = create_sql_agent(
+                llm=llm,
+                toolkit=toolkit,
+                retriever=retriever,
+                verbose=verbose,
+                handle_parsing_errors=True,
+                prefix=prompt
+            )
+
+            return agent
+        except Exception as e:
+            raise Exception(f"Failed to connect to SQL database. Please check the database URI. Error: {str(e)}")
 
 class NoSQLAgentComponent(CustomComponent):
     display_name = "NoSQLAgent"
     description = "Construct a NoSQL agent from an LLM and tools."
-    
+
     def build_config(self):
         return {
             "llm": {"display_name": "LLM"},
@@ -113,54 +115,101 @@ class NoSQLAgentComponent(CustomComponent):
         index_name: str = "default",
         verbose: bool = False,
     ) -> Union[AgentExecutor, Callable]:
-        try:
-            # Initialize MongoDB client
-            client = MongoClient(mongodb_uri)
-            db = client[db_name]
-            collection = db[collection_name]
-            
-            # Initialize Google embeddings
-            embeddings = GoogleGenerativeAIEmbeddings(
-                model="models/embedding-001",  # Google's embedding model
-                google_api_key=google_api_key,
-            )
-            
-            # Create vector store
-            vector_store = MongoDBAtlasVectorSearch.from_connection_string(
-                connection_string=mongodb_uri,
-                namespace=f"{db_name}.{collection_name}",
-                embedding=embeddings,
-                index_name=index_name
-            )
-            
-            # Create MongoDB query tool
-            def query_mongodb(query_str: str) -> str:
-                try:
-                    results = collection.find().sort('_id', -1).limit(5)
-                    return "\n".join([str(doc) for doc in results])
-                except Exception as e:
-                    return f"Error executing query: {str(e)}"
+        client = MongoClient(mongodb_uri)
+        db = client[db_name]
+        collection = db[collection_name]
+        
+        embeddings = GoogleGenerativeAIEmbeddings(
+            model="models/embedding-001", 
+            google_api_key=google_api_key,
+        )
+        
+        vector_store = MongoDBAtlasVectorSearch.from_connection_string(
+            connection_string=mongodb_uri,
+            namespace=f"{db_name}.{collection_name}",
+            embedding=embeddings,
+            index_name=index_name
+        )
 
-            tools = [
-                Tool(
-                    name="MongoDB Query",
-                    func=query_mongodb,
-                    description="Useful for querying MongoDB database to find recent entries and specific information."
-                )
-            ]
-            
-            # Initialize agent
-            agent = initialize_agent(
-                tools=tools,
-                llm=llm,
-                agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
-                verbose=verbose
+        
+        def query_mongodb(query_str: str) -> str:
+            try:
+                results = collection.find().sort('_id', -1).limit(5)
+                formatted_results = []
+                for doc in results:
+                    # Convert ObjectId to string and format the document
+                    doc['_id'] = str(doc['_id'])
+                    formatted_results.append(str(doc))
+                return "\n".join(formatted_results)
+            except Exception as e:
+                return f"Error executing query: {str(e)}"
+
+        tools = [
+            Tool(
+                name="MongoDB Query",
+                func=query_mongodb,
+                description="Useful for querying MongoDB database. Returns formatted results from the collection."
             )
-            
-            return agent
-            
-        except Exception as e:
-            raise Exception(f"Error building NoSQL agent: {str(e)}")
+        ]
+        
+        # Use a retriever tool for enhanced data retrieval
+        retriever_tool = RetrieverToolComponent()
+        retriever = retriever_tool.build(
+            retriever=vector_store,
+            name="NoSQLRetriever",
+            description="Retrieves data from NoSQL database"
+        )
+
+        # Create MongoDB agent with enhanced prompting
+        prompt = create_enhanced_agent_prompt("nosql")
+        agent = initialize_agent(
+            tools=tools,
+            llm=llm,
+            agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
+            verbose=verbose,
+            agent_kwargs={"prefix": prompt}
+        )
+        
+        return agent
+
+
+
+def enhance_agent_configuration(agent_config: dict, db_type: str) -> dict:
+    """Enhances the agent configuration with better prompting and response handling"""
+
+    agent_config["system_message"] = create_enhanced_agent_prompt(db_type)
+    
+    agent_config.update({
+        "response_format": {
+            "type": "structured_natural_language",
+            "include_metadata": True,
+            "error_handling": "verbose"
+        },
+        "output_parser_config": {
+            "require_complete_sentences": True,
+            "maintain_context": True,
+            "format_lists": True
+        }
+    })
+    
+    return agent_config
+
+
+def create_sql_query_agent(api_key: str, database_uri: str, verbose: bool = False):
+    llm = ChatGoogleGenerativeAI(
+        api_key=api_key,
+        model="gemini-1.5-pro",
+        temperature=0.5
+    )
+    
+    sql_agent_component = SQLAgentComponent()
+    sql_agent = sql_agent_component.build(
+        llm=llm,
+        database_uri=database_uri,
+        verbose=verbose
+    )
+    
+    return sql_agent, sql_agent_component
 
 def create_nosql_query_agent(
     google_api_key: str,
@@ -170,72 +219,332 @@ def create_nosql_query_agent(
     index_name: str = "default",
     verbose: bool = False
 ):
-    try:
-        llm = ChatGoogleGenerativeAI(
-            api_key=google_api_key,
-            model="gemini-1.5-pro",
-            temperature=0
-        )
-        
-        nosql_agent_component = NoSQLAgentComponent()
-        
-        nosql_agent = nosql_agent_component.build(
-            llm=llm,
-            mongodb_uri=mongodb_uri,
-            db_name=db_name,
-            collection_name=collection_name,
-            google_api_key=google_api_key,
-            index_name=index_name,
-            verbose=verbose
-        )
-        
-        return nosql_agent, nosql_agent_component
-        
-    except Exception as e:
-        raise Exception(f"Error creating NoSQL agent: {str(e)}")
+    llm = ChatGoogleGenerativeAI(
+        api_key=google_api_key,
+        model="gemini-1.5-pro",
+        temperature=0.5
+    )
+    
+    nosql_agent_component = NoSQLAgentComponent()
+    nosql_agent = nosql_agent_component.build(
+        llm=llm,
+        mongodb_uri=mongodb_uri,
+        db_name=db_name,
+        collection_name=collection_name,
+        google_api_key=google_api_key,
+        index_name=index_name,
+        verbose=verbose
+    )
+    
+    return nosql_agent, nosql_agent_component
 
 def query_database(agent: AgentExecutor, question: str) -> str:
     try:
-        response = agent.invoke({"input": question})
-        return response["output"]
+        enhanced_question = f"""
+        Please provide a concise and clear response to the following question,
+        keeping the answer focused and to the point. If the requested information is not available,
+        explain what was searched for and suggest relevant alternatives.
+
+        Question: {question}
+        """
+        response = agent.invoke({"input": enhanced_question})
+        
+        output = response["output"].strip()
+        if "Final Answer:" in output:
+            formatted_response = output.split("Final Answer:")[-1].strip()
+        else:
+            formatted_response = output
+        
+        if len(formatted_response.split()) < 10:
+            formatted_response = f"""Based on the database search: {formatted_response}
+
+If you'd like more specific information, please feel free to ask about particular tables or data points."""
+            
+        return formatted_response
+        
     except Exception as e:
         return f"Error querying database: {str(e)}"
 
-if __name__ == "__main__":
-    # Configuration
-    google_api_key = "AIzaSyAEOVGaFTlqhwDVhuw5XuddBOM6ZNoYIdk"
-    mongodb_uri = "mongodb://localhost:27017/"
-    db_name = "mydatabase"
-    collection_name = "mycollection"
-    index_name = "vector_index"
-    
+
+
+@app.post("/connect-db")
+async def connect_db(request: QueryRequest):
     try:
-        # First, verify MongoDB connection
-        client = MongoClient(mongodb_uri)
-        client.admin.command('ping')
-        print("Successfully connected to MongoDB!")
-        
-        # Create and test the agent
-        nosql_agent, component = create_nosql_query_agent(
-            google_api_key=google_api_key,
-            mongodb_uri=mongodb_uri,
-            db_name=db_name,
-            collection_name=collection_name,
-            index_name=index_name,
-            verbose=True
-        )
-        
-        questions = [
-            "create a level of effort with module and write in table format",
-        ]
-        
-        for question in questions:
-            print(f"\nQuestion: {question}")
-            response = query_database(nosql_agent, question)
-            print(f"Response: {response}")
-            
+        if request.db_type not in ["sql", "nosql"]:
+            raise HTTPException(
+                status_code=400,
+                detail="db_type must be either 'sql' or 'nosql'"
+            )
+
+        if request.db_type == "sql":
+            if not any(prefix in request.database_uri.lower() for prefix in ['postgresql://', 'mysql://']):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Invalid SQL database URI. Must be PostgreSQL or MySQL URI format."
+                )
+            is_valid_sql, sql_error = validate_sql_connection(request.database_uri)
+            if not is_valid_sql:
+                raise HTTPException(status_code=400, detail=sql_error)
+
+            if request.db_name or request.collection_name:
+                raise HTTPException(
+                    status_code=400,
+                    detail="db_name and collection_name should not be provided for SQL connections"
+                )
+        else: 
+            is_valid_uri, uri_error = validate_mongodb_uri(request.database_uri)
+            if not is_valid_uri:
+                raise HTTPException(status_code=400, detail=uri_error)
+
+            is_valid_connection, connection_error = validate_mongodb_connection(request.database_uri, request.db_name, request.collection_name)
+            if not is_valid_connection:
+                raise HTTPException(status_code=400, detail=connection_error)
+
+            is_valid_db, db_error = validate_mongodb_database_name(request.db_name)
+            if not is_valid_db:
+                raise HTTPException(status_code=400, detail=db_error)
+
+            is_valid_collection, collection_error = validate_mongodb_collection_name(request.collection_name)
+            if not is_valid_collection:
+                raise HTTPException(status_code=400, detail=collection_error)
+
+        with connect_to_db() as connection:
+            with connection.cursor(dictionary=True) as cursor:
+                # Check if any record exists
+                cursor.execute("SELECT * FROM db_connections LIMIT 1")
+                existing_record = cursor.fetchone()
+                
+                while cursor.nextset():
+                    pass
+
+                if existing_record:
+                    update_query = "UPDATE db_connections SET database_uri = %s, db_type = %s"
+                    update_params = [request.database_uri, request.db_type]
+                    
+                    if request.db_type == "nosql":
+                        update_query += ", db_name = %s, collection_name = %s, allowed_databases = %s"
+                        update_params.extend([request.db_name, request.collection_name, 'mongodb'])
+                    else:
+                        update_query += ", db_name = NULL, collection_name = NULL, allowed_databases = %s"
+                        update_params.append('mysql,postgresql')
+                    
+                    update_query += " WHERE id = %s" 
+                    update_params.append(existing_record['id'])
+                    
+                    cursor.execute(update_query, update_params)
+                    message = "Database Connected!"
+                else:
+                    insert_query = """
+                        INSERT INTO db_connections 
+                        (database_uri, db_type, db_name, collection_name, allowed_databases)
+                        VALUES (%s, %s, %s, %s, %s)
+                    """
+                    if request.db_type == "nosql":
+                        cursor.execute(insert_query, (
+                            request.database_uri, 
+                            request.db_type, 
+                            request.db_name, 
+                            request.collection_name, 
+                            'mongodb'
+                        ))
+                    else:
+                        cursor.execute(insert_query, (
+                            request.database_uri, 
+                            request.db_type, 
+                            None, 
+                            None, 
+                            'mysql,postgresql'
+                        ))
+                    message = "Connection saved successfully."
+
+                connection.commit()
+
+        return {"message": message}
+
+    except mysql.connector.Error as db_err:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(db_err)}")
+    except HTTPException as http_err:
+        raise http_err
     except Exception as e:
-        print(f"An error occurred: {str(e)}")
-    finally:
-        if 'client' in locals():
-            client.close()
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
+
+
+@app.post("/chat")
+async def chat(
+    request: QueryRequest,
+    thread_id: str = Query(None),
+    current_user: UserSession = Depends(get_current_user)
+):
+    try:
+        connection = connect_to_db()
+        if not connection:
+            raise HTTPException(status_code=500, detail="Unable to connect to the database.")
+
+        cursor = connection.cursor(dictionary=True)
+        
+        email_id = current_user.email_id
+        token = current_user.token
+        role = current_user.role
+
+        await save_user_session(email_id,role, token, connection)
+        
+        cursor.execute("SELECT * FROM db_connections ORDER BY created_at DESC LIMIT 1")
+        db_connection = cursor.fetchone()
+
+        if not db_connection:
+            raise HTTPException(status_code=400, detail="No database found. Connect to the database first.")
+        
+        database_uri = db_connection["database_uri"]
+        db_type = db_connection["db_type"]
+        db_name = db_connection["db_name"]
+        collection_name = db_connection["collection_name"]
+        allowed_databases = db_connection["allowed_databases"].split(',')
+        
+        if db_type == "sql":
+            if not any(db in database_uri.lower() for db in allowed_databases):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid SQL database URI. Supported databases: {', '.join(allowed_databases)}."
+                )
+        elif db_type == "nosql":
+            if not any(db in database_uri.lower() for db in allowed_databases):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid NoSQL database URI. Supported databases: {', '.join(allowed_databases)}."
+                )
+
+        is_new_thread = thread_id is None
+        if is_new_thread:
+            thread_id = str(uuid.uuid4())
+
+        question = request.question
+        google_api_key = GOOGLE_API_KEY
+
+        if db_type == "sql":
+            sql_agent, component = create_sql_query_agent(
+                api_key=google_api_key,
+                database_uri=database_uri,
+                verbose=True
+            )
+        elif db_type == "nosql":
+            mongodb_uri = database_uri
+            sql_agent, component = create_nosql_query_agent(
+                google_api_key=google_api_key,
+                mongodb_uri=mongodb_uri,
+                db_name=db_name,
+                collection_name=collection_name,
+                verbose=True
+            )
+        else:
+            raise HTTPException(status_code=400, detail="Invalid database type specified")
+
+        response = query_database(sql_agent, question)
+
+        heading = None
+        query_heading = """
+            SELECT heading FROM history 
+            WHERE thread_id = %s AND email_id = %s 
+            LIMIT 1
+        """
+        cursor.execute(query_heading, (thread_id, current_user.email_id))
+        result = cursor.fetchone()
+
+        if result and result.get("heading"):
+            heading = result["heading"]
+        elif is_new_thread:
+            heading = await generate_heading(request.question, response)
+
+        save_query = """
+            INSERT INTO history (thread_id, user_query, ai_response, heading, email_id)
+            VALUES (%s, %s, %s, %s, %s)
+        """
+        cursor.execute(save_query, (
+            thread_id,
+            question,
+            response,
+            heading,
+            current_user.email_id
+        ))
+        connection.commit()
+
+        query_history = """
+            SELECT * FROM history 
+            WHERE thread_id = %s AND email_id = %s 
+            ORDER BY id ASC
+        """
+        cursor.execute(query_history, (thread_id, current_user.email_id))
+        history = cursor.fetchall()
+
+        cursor.close()
+        connection.close()
+
+        # Format response
+        human_messages = []
+        ai_responses = []
+
+        for record in history:
+            human_messages.append(record["user_query"])
+            ai_responses.append(record["ai_response"])
+
+        response_data = {
+            "thread_id": thread_id,
+            "ai_response": ai_responses,
+            "human_message": human_messages,
+            "heading": heading,
+            "email_id": current_user.email_id,
+            "role": role
+        }
+
+        return response_data
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
+@app.get("/chat")
+async def get_history(
+    user_session: UserSession = Depends(get_current_user), 
+    thread_id: Optional[str] = None
+):
+    try:
+        email_id = user_session.email_id
+        role = user_session.role
+
+        connection = connect_to_db()
+        if connection:
+            cursor = connection.cursor(dictionary=True)
+
+            if thread_id:
+                query = "SELECT * FROM history WHERE thread_id = %s AND email_id = %s ORDER BY id ASC"
+                cursor.execute(query, (thread_id, email_id))
+            else:
+                query = "SELECT * FROM history WHERE email_id = %s ORDER BY id DESC"
+                cursor.execute(query, (email_id,))
+
+            history = cursor.fetchall()
+            cursor.close()
+            connection.close()
+
+            grouped_history = {}
+            for record in history:
+                thread_id = record["thread_id"]
+                if thread_id not in grouped_history:
+                    grouped_history[thread_id] = {
+                        "thread_id": thread_id,
+                        "human_message": [],
+                        "ai_response": [],
+                        "heading": record["heading"],
+                    }
+                grouped_history[thread_id]["human_message"].append(record["user_query"])
+                grouped_history[thread_id]["ai_response"].append(record["ai_response"])
+
+            return [{"role": role, **item} for item in grouped_history.values()]
+
+        else:
+            raise HTTPException(status_code=500, detail="Database connection failed")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error retrieving history: {str(e)}")
+
+
+if __name__ == "__main__":
+    pass

@@ -20,20 +20,41 @@ def connect_to_db():
         print(f"Error: {e}")
         return None
 
-def save_query_and_answer(user_query: str, ai_response: str, thread_id: str, heading: str = None):
-    try:
-        connection = connect_to_db()
-        if connection:
-            cursor = connection.cursor()
-            # Insert query and answer into the history table, including the heading
-            query = """
-                INSERT INTO history (thread_id, user_query, ai_response, heading)
-                VALUES (%s, %s, %s, %s)
+def save_query_and_answer(question: str, answer: str, thread_id: str = None):
+    """Save the user query and agent's response into the MySQL database."""
+    connection = connect_to_db()
+    if connection is not None:
+        cursor = connection.cursor()
+        try:
+            insert_query = """
+            INSERT INTO history (user_query, ai_response, thread_id)
+            VALUES (%s, %s, %s)
             """
-            cursor.execute(query, (thread_id, user_query, ai_response, heading))
+            cursor.execute(insert_query, (question, answer, thread_id))
             connection.commit()
+        except Error as e:
+            print(f"Error while saving to database: {e}")
+        finally:
             cursor.close()
             connection.close()
-    except Error as e:
-        print(f"Error saving query and answer: {str(e)}")
-
+            
+def save_query_and_answer(question: str, answer: str):
+    """Save the user query and agent's response into the MySQL database."""
+    connection = connect_to_db()
+    if connection is not None:
+        cursor = connection.cursor()
+        try:
+            insert_query = """
+            INSERT INTO history (user_query, ai_response)
+            VALUES (%s, %s)
+            """
+            cursor.execute(insert_query, (question, answer))
+            connection.commit()
+            print(f"Query and answer saved: {question} -> {answer}")
+        except Error as e:
+            print(f"Error while saving to database: {e}")
+        finally:
+            cursor.close()
+            connection.close()
+    else:
+        print("Failed to connect to the database.")

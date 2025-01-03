@@ -1,11 +1,17 @@
 import google.generativeai as genai
+import os
+from dotenv import load_dotenv
 
-# Configure the Gemini API with your API key
-genai.configure(api_key="AIzaSyAEOVGaFTlqhwDVhuw5XuddBOM6ZNoYIdk")
+load_dotenv()
+
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+if not GOOGLE_API_KEY:
+    raise ValueError("GOOGLE_API_KEY is missing in .env file")
+
+genai.configure(api_key=GOOGLE_API_KEY)
 
 async def generate_heading(user_message: str, ai_response: str) -> str:
     try:
-        # Prepare the prompt for generating the heading
         prompt = f"""
         User's message: {user_message}
         AI's response: {ai_response}
@@ -14,11 +20,9 @@ async def generate_heading(user_message: str, ai_response: str) -> str:
         Note: Please don't use any commas and any type of brackets
         """
         
-        # Use the generative model to create the content
         model = genai.GenerativeModel("gemini-1.5-flash")
         response = model.generate_content(prompt)
         
-        # Extract the text from the response and truncate to 50 characters
         heading = response.text.strip()[:50]
         return heading
 

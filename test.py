@@ -416,9 +416,11 @@ async def get_history(thread_id: str = None):
 
             # SQL query to fetch all history or filter by thread_id
             if thread_id:
-                query = "SELECT * FROM history WHERE thread_id = %s ORDER BY id DESC"
+                # For a specific thread, fetch in normal order (oldest first)
+                query = "SELECT * FROM history WHERE thread_id = %s ORDER BY id ASC"
                 cursor.execute(query, (thread_id,))
             else:
+                # For all history, get the latest data first (descending order by id or timestamp)
                 query = "SELECT * FROM history ORDER BY id DESC"
                 cursor.execute(query)
 
@@ -449,7 +451,7 @@ async def get_history(thread_id: str = None):
             raise HTTPException(status_code=500, detail="Database connection failed")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error retrieving history: {str(e)}")
-    
+
 
 if __name__ == "__main__":
     pass
