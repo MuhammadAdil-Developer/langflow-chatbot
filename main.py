@@ -15,7 +15,10 @@ from langchain_mongodb import MongoDBAtlasVectorSearch
 from langchain.tools import Tool
 from pymongo import MongoClient
 from langchain.chains import RetrievalQA
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
+# from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from groq import Groq
+from langchain_groq import ChatGroq
 from langflow.components.tools import RetrieverToolComponent
 from dotenv import load_dotenv
 from typing import Callable, Union, Optional
@@ -24,11 +27,12 @@ from memory import save_query_and_answer, connect_to_db
 from heading_generator import generate_heading
 from utils import (validate_mongodb_uri, validate_mongodb_database_name, validate_mongodb_collection_name, 
                    validate_sql_connection,validate_mongodb_connection, create_enhanced_agent_prompt,get_current_user,
-                   save_user_session
+                   save_user_session, validate_sqlserver_connection
 )
 
 load_dotenv()
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+GROQ_API_KEY  = os.getenv("GROQ_API_KEY")
 username = os.getenv("username")
 
 app = FastAPI()
@@ -119,10 +123,15 @@ class NoSQLAgentComponent(CustomComponent):
         db = client[db_name]
         collection = db[collection_name]
         
-        embeddings = GoogleGenerativeAIEmbeddings(
-            model="models/embedding-001", 
-            google_api_key=google_api_key,
+        # embeddings = GoogleGenerativeAIEmbeddings(
+        #     model="models/embedding-001", 
+        #     google_api_key=google_api_key,
+        # )
+        embeddings = HuggingFaceEmbeddings(
+            model_name="sentence-transformers/all-mpnet-base-v2"
         )
+
+
         
         vector_store = MongoDBAtlasVectorSearch.from_connection_string(
             connection_string=mongodb_uri,
@@ -196,12 +205,17 @@ def enhance_agent_configuration(agent_config: dict, db_type: str) -> dict:
 
 
 def create_sql_query_agent(api_key: str, database_uri: str, verbose: bool = False):
-    llm = ChatGoogleGenerativeAI(
-        api_key=api_key,
-        model="gemini-1.5-pro",
-        temperature=0.5
+    # llm = ChatGoogleGenerativeAI(
+    #     api_key=api_key,
+    #     model="gemini-1.5-pro",
+    #     temperature=0.5
+    # )
+    llm = ChatGroq(
+        groq_api_key=api_key,
+        model_name="llama-3.1-70b-versatile",
+        temperature=0.2
     )
-    
+
     sql_agent_component = SQLAgentComponent()
     sql_agent = sql_agent_component.build(
         llm=llm,
@@ -212,18 +226,25 @@ def create_sql_query_agent(api_key: str, database_uri: str, verbose: bool = Fals
     return sql_agent, sql_agent_component
 
 def create_nosql_query_agent(
-    google_api_key: str,
+    # google_api_key: str,
+    groq_api_key: str,
     mongodb_uri: str,
     db_name: str,
     collection_name: str,
     index_name: str = "default",
     verbose: bool = False
 ):
-    llm = ChatGoogleGenerativeAI(
-        api_key=google_api_key,
-        model="gemini-1.5-pro",
-        temperature=0.5
+    # llm = ChatGoogleGenerativeAI(
+    #     api_key=google_api_key,
+    #     model="gemini-1.5-pro",
+    #     temperature=0.5
+    # )
+    llm = ChatGroq(
+        groq_api_key=groq_api_key,
+        model_name="llama-3.1-70b-versatile",  # or any other Groq model you prefer
+        temperature=0.2
     )
+
     
     nosql_agent_component = NoSQLAgentComponent()
     nosql_agent = nosql_agent_component.build(
@@ -231,7 +252,9 @@ def create_nosql_query_agent(
         mongodb_uri=mongodb_uri,
         db_name=db_name,
         collection_name=collection_name,
-        google_api_key=google_api_key,
+        # google_api_key=google_api_key,
+        google_api_key=groq_api_key,
+
         index_name=index_name,
         verbose=verbose
     )
@@ -266,7 +289,6 @@ If you'd like more specific information, please feel free to ask about particula
         return f"Error querying database: {str(e)}"
 
 
-
 @app.post("/connect-db")
 async def connect_db(request: QueryRequest):
     try:
@@ -277,11 +299,13 @@ async def connect_db(request: QueryRequest):
             )
 
         if request.db_type == "sql":
-            if not any(prefix in request.database_uri.lower() for prefix in ['postgresql://', 'mysql://']):
+            valid_prefixes = ['postgresql://', 'mysql://', 'mssql+pyodbc://']
+            if not any(prefix in request.database_uri.lower() for prefix in valid_prefixes):
                 raise HTTPException(
-                    status_code=400,
-                    detail="Invalid SQL database URI. Must be PostgreSQL or MySQL URI format."
+                    status_code=400, 
+                    detail="Invalid SQL URI format. Must be PostgreSQL, MySQL, or SQL Server URI."
                 )
+
             is_valid_sql, sql_error = validate_sql_connection(request.database_uri)
             if not is_valid_sql:
                 raise HTTPException(status_code=400, detail=sql_error)
@@ -291,14 +315,17 @@ async def connect_db(request: QueryRequest):
                     status_code=400,
                     detail="db_name and collection_name should not be provided for SQL connections"
                 )
-        else: 
+        else:
+            # Validate MongoDB connection
             is_valid_uri, uri_error = validate_mongodb_uri(request.database_uri)
             if not is_valid_uri:
                 raise HTTPException(status_code=400, detail=uri_error)
 
-            is_valid_connection, connection_error = validate_mongodb_connection(request.database_uri, request.db_name, request.collection_name)
-            if not is_valid_connection:
-                raise HTTPException(status_code=400, detail=connection_error)
+            if not request.db_name or not request.collection_name:
+                raise HTTPException(
+                    status_code=400,
+                    detail="db_name and collection_name are required for MongoDB connections"
+                )
 
             is_valid_db, db_error = validate_mongodb_database_name(request.db_name)
             if not is_valid_db:
@@ -308,54 +335,86 @@ async def connect_db(request: QueryRequest):
             if not is_valid_collection:
                 raise HTTPException(status_code=400, detail=collection_error)
 
+            is_valid_connection, connection_error = validate_mongodb_connection(
+                request.database_uri, 
+                request.db_name, 
+                request.collection_name
+            )
+            if not is_valid_connection:
+                raise HTTPException(status_code=400, detail=connection_error)
+
+        # Save to database
         with connect_to_db() as connection:
             with connection.cursor(dictionary=True) as cursor:
-                # Check if any record exists
+                # Check existing record
                 cursor.execute("SELECT * FROM db_connections LIMIT 1")
                 existing_record = cursor.fetchone()
-                
+
                 while cursor.nextset():
                     pass
 
                 if existing_record:
-                    update_query = "UPDATE db_connections SET database_uri = %s, db_type = %s"
-                    update_params = [request.database_uri, request.db_type]
-                    
-                    if request.db_type == "nosql":
-                        update_query += ", db_name = %s, collection_name = %s, allowed_databases = %s"
-                        update_params.extend([request.db_name, request.collection_name, 'mongodb'])
-                    else:
-                        update_query += ", db_name = NULL, collection_name = NULL, allowed_databases = %s"
-                        update_params.append('mysql,postgresql')
-                    
-                    update_query += " WHERE id = %s" 
-                    update_params.append(existing_record['id'])
-                    
-                    cursor.execute(update_query, update_params)
-                    message = "Database Connected!"
-                else:
-                    insert_query = """
-                        INSERT INTO db_connections 
-                        (database_uri, db_type, db_name, collection_name, allowed_databases)
-                        VALUES (%s, %s, %s, %s, %s)
+                    # Update existing record
+                    update_query = """
+                    UPDATE db_connections 
+                    SET database_uri = %s, 
+                        db_type = %s, 
+                        db_name = %s, 
+                        collection_name = %s, 
+                        allowed_databases = %s 
+                    WHERE id = %s
                     """
-                    if request.db_type == "nosql":
-                        cursor.execute(insert_query, (
-                            request.database_uri, 
-                            request.db_type, 
-                            request.db_name, 
-                            request.collection_name, 
-                            'mongodb'
-                        ))
+                    
+                    if request.db_type == "sql":
+                        allowed_dbs = 'mssql' if 'mssql+pyodbc://' in request.database_uri.lower() else 'mysql,postgresql'
+                        params = (
+                            request.database_uri,
+                            request.db_type,
+                            None,
+                            None,
+                            allowed_dbs,
+                            existing_record['id']
+                        )
                     else:
-                        cursor.execute(insert_query, (
-                            request.database_uri, 
-                            request.db_type, 
-                            None, 
-                            None, 
-                            'mysql,postgresql'
-                        ))
-                    message = "Connection saved successfully."
+                        params = (
+                            request.database_uri,
+                            request.db_type,
+                            request.db_name,
+                            request.collection_name,
+                            'mongodb',
+                            existing_record['id']
+                        )
+                    
+                    cursor.execute(update_query, params)
+                    message = "Database connection updated successfully!"
+                else:
+                    # Insert new record
+                    insert_query = """
+                    INSERT INTO db_connections 
+                    (database_uri, db_type, db_name, collection_name, allowed_databases)
+                    VALUES (%s, %s, %s, %s, %s)
+                    """
+                    
+                    if request.db_type == "sql":
+                        allowed_dbs = 'mssql' if 'mssql+pyodbc://' in request.database_uri.lower() else 'mysql,postgresql'
+                        params = (
+                            request.database_uri,
+                            request.db_type,
+                            None,
+                            None,
+                            allowed_dbs
+                        )
+                    else:
+                        params = (
+                            request.database_uri,
+                            request.db_type,
+                            request.db_name,
+                            request.collection_name,
+                            'mongodb'
+                        )
+                    
+                    cursor.execute(insert_query, params)
+                    message = "Database connection saved successfully!"
 
                 connection.commit()
 
@@ -367,7 +426,6 @@ async def connect_db(request: QueryRequest):
         raise http_err
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
-
 
 
 @app.post("/chat")
@@ -419,18 +477,19 @@ async def chat(
             thread_id = str(uuid.uuid4())
 
         question = request.question
-        google_api_key = GOOGLE_API_KEY
-
+        # google_api_key = GOOGLE_API_KEY
+        groq_api_key = GROQ_API_KEY
+        
         if db_type == "sql":
             sql_agent, component = create_sql_query_agent(
-                api_key=google_api_key,
+                api_key=groq_api_key,
                 database_uri=database_uri,
                 verbose=True
             )
         elif db_type == "nosql":
             mongodb_uri = database_uri
             sql_agent, component = create_nosql_query_agent(
-                google_api_key=google_api_key,
+                api_key=groq_api_key,
                 mongodb_uri=mongodb_uri,
                 db_name=db_name,
                 collection_name=collection_name,

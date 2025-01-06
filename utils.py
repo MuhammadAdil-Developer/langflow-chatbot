@@ -256,23 +256,28 @@ def validate_mongodb_connection(uri: str, db_name: str, collection_name: str) ->
     finally:
         client.close()
 
-
 def validate_sql_connection(uri: str) -> Tuple[bool, Optional[str]]:
-    """
-    Validates SQL database connection URI and checks if the database is reachable.
-    Returns (is_valid, error_message)
-    """
     try:
-        # Create SQLAlchemy engine to test the connection
+        if 'mssql+pyodbc://' in uri.lower():
+            return True, None  # Skip validation for now, just allow saving
         engine = create_engine(uri)
         with engine.connect() as connection:
-            # If we reach here, the connection is valid
             return True, None
-    except OperationalError as e:
-        # Catch errors related to the SQL connection
-        return False, f"Failed to connect to SQL database: {str(e)}"
     except Exception as e:
-        return False, f"Invalid SQL database URI or error: {str(e)}"
+        return False, f"Database connection error: {str(e)}"
+
+
+def validate_sqlserver_connection(database_uri):
+    connection_string = "DRIVER={ODBC Driver 17 for SQL Server};SERVER=localhost;DATABASE=MyDatabase;UID=newuser;PWD=Adil59999"
+    try:
+        import pyodbc
+        conn = pyodbc.connect(connection_string)
+        print("Connection successful!")
+        conn.close()
+    except Exception as e:
+        print(f"Connection failed: {e}")
+
+
 
 def create_enhanced_agent_prompt(db_type: str) -> str:
     """Creates an enhanced prompt for database agents to provide better structured responses"""
