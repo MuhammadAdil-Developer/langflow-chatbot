@@ -418,7 +418,7 @@ async def connect_db(request: QueryRequest):
 
                 connection.commit()
 
-        return {"message": message}
+        return {"mesage": message}
 
     except mysql.connector.Error as db_err:
         raise HTTPException(status_code=500, detail=f"Database error: {str(db_err)}")
