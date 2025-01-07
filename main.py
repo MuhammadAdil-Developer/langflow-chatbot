@@ -20,6 +20,7 @@ from langchain_community.embeddings import HuggingFaceEmbeddings
 from groq import Groq
 from langchain_groq import ChatGroq
 from langflow.components.tools import RetrieverToolComponent
+from langchain.memory import ConversationBufferMemory
 from dotenv import load_dotenv
 from typing import Callable, Union, Optional
 from pydantic import BaseModel
@@ -74,6 +75,7 @@ class SQLAgentComponent:
             db = SQLDatabase.from_uri(database_uri)
             toolkit = SQLDatabaseToolkit(db=db, llm=llm)
             
+            # Use a retriever tool for enhanced data retrieval
             retriever_tool = RetrieverToolComponent()
             retriever = retriever_tool.build(
                 retriever=toolkit,
@@ -81,11 +83,15 @@ class SQLAgentComponent:
                 description="Retrieves data from SQL database"
             )
             
+            # Initialize memory for conversation history
+            memory = ConversationBufferMemory(memory_key="chat_history")
+
             prompt = create_enhanced_agent_prompt("sql")
             agent = create_sql_agent(
                 llm=llm,
                 toolkit=toolkit,
                 retriever=retriever,
+                memory=memory,
                 verbose=verbose,
                 handle_parsing_errors=True,
                 prefix=prompt
@@ -94,6 +100,7 @@ class SQLAgentComponent:
             return agent
         except Exception as e:
             raise Exception(f"Failed to connect to SQL database. Please check the database URI. Error: {str(e)}")
+
 
 class NoSQLAgentComponent(CustomComponent):
     display_name = "NoSQLAgent"
@@ -146,7 +153,6 @@ class NoSQLAgentComponent(CustomComponent):
                 results = collection.find().sort('_id', -1).limit(5)
                 formatted_results = []
                 for doc in results:
-                    # Convert ObjectId to string and format the document
                     doc['_id'] = str(doc['_id'])
                     formatted_results.append(str(doc))
                 return "\n".join(formatted_results)
@@ -169,17 +175,20 @@ class NoSQLAgentComponent(CustomComponent):
             description="Retrieves data from NoSQL database"
         )
 
-        # Create MongoDB agent with enhanced prompting
+        memory = ConversationBufferMemory(memory_key="chat_history")
+
         prompt = create_enhanced_agent_prompt("nosql")
         agent = initialize_agent(
             tools=tools,
             llm=llm,
+            memory=memory,  # 
             agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
             verbose=verbose,
             agent_kwargs={"prefix": prompt}
         )
         
         return agent
+
 
 
 
