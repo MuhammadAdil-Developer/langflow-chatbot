@@ -122,7 +122,6 @@ class NoSQLAgentComponent(CustomComponent):
         mongodb_uri: str,
         db_name: str,
         collection_name: str,
-        google_api_key: str,
         index_name: str = "default",
         verbose: bool = False,
     ) -> Union[AgentExecutor, Callable]:
@@ -213,14 +212,14 @@ def enhance_agent_configuration(agent_config: dict, db_type: str) -> dict:
     return agent_config
 
 
-def create_sql_query_agent(api_key: str, database_uri: str, verbose: bool = False):
+def create_sql_query_agent(groq_api_key: str, database_uri: str, verbose: bool = False):
     # llm = ChatGoogleGenerativeAI(
     #     api_key=api_key,
     #     model="gemini-1.5-pro",
     #     temperature=0.5
     # )
     llm = ChatGroq(
-        groq_api_key=api_key,
+        groq_api_key=groq_api_key,
         model_name="llama-3.1-70b-versatile",
         temperature=0.2
     )
@@ -233,6 +232,7 @@ def create_sql_query_agent(api_key: str, database_uri: str, verbose: bool = Fals
     )
     
     return sql_agent, sql_agent_component
+
 
 def create_nosql_query_agent(
     # google_api_key: str,
@@ -261,23 +261,20 @@ def create_nosql_query_agent(
         mongodb_uri=mongodb_uri,
         db_name=db_name,
         collection_name=collection_name,
-        # google_api_key=google_api_key,
-        google_api_key=groq_api_key,
-
         index_name=index_name,
         verbose=verbose
     )
     
     return nosql_agent, nosql_agent_component
 
-def query_database(agent: AgentExecutor, question: str) -> str:
+def query_database(agent: AgentExecutor, question: str, limit: int = 50) -> str:
     try:
         enhanced_question = f"""
         Please provide a concise and clear response to the following question,
         keeping the answer focused and to the point. If the requested information is not available,
         explain what was searched for and suggest relevant alternatives.
 
-        Question: {question}
+        Question: {question} LIMIT {limit}
         """
         response = agent.invoke({"input": enhanced_question})
         
@@ -296,7 +293,6 @@ If you'd like more specific information, please feel free to ask about particula
         
     except Exception as e:
         return f"Error querying database: {str(e)}"
-
 
 @app.post("/connect-db")
 async def connect_db(request: QueryRequest):
@@ -491,19 +487,20 @@ async def chat(
         
         if db_type == "sql":
             sql_agent, component = create_sql_query_agent(
-                api_key=groq_api_key,
+                groq_api_key=groq_api_key,
                 database_uri=database_uri,
                 verbose=True
             )
         elif db_type == "nosql":
             mongodb_uri = database_uri
-            sql_agent, component = create_nosql_query_agent(
-                api_key=groq_api_key,
+            nosql_agent, component = create_nosql_query_agent(
+                groq_api_key=groq_api_key,
                 mongodb_uri=mongodb_uri,
                 db_name=db_name,
                 collection_name=collection_name,
                 verbose=True
             )
+            sql_agent = nosql_agent
         else:
             raise HTTPException(status_code=400, detail="Invalid database type specified")
 
@@ -560,8 +557,8 @@ async def chat(
             "ai_response": ai_responses,
             "human_message": human_messages,
             "heading": heading,
-            "email_id": current_user.email_id,
-            "role": role
+            # "email_id": current_user.email_id,
+            # "role": role
         }
 
         return response_data
